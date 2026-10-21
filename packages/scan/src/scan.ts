@@ -3,7 +3,16 @@
  */
 import { isHeic, decodeHeic } from './heic.js';
 import { deskew, detectQuad } from './pipeline.js';
-import type { ScanCorners, ScanOptions, ScanResult } from './types.js';
+import { performOcr } from './ocr.js';
+import { parseDocument } from './parser.js';
+import { renderTemplate } from './templates.js';
+import type {
+  ScanCorners,
+  ScanOptions,
+  ScanResult,
+  ScanToTemplateOptions,
+  ScanToTemplateResult,
+} from './types.js';
 
 /**
  * Loads a Blob into an ImageBitmap or HTMLImageElement.
@@ -202,4 +211,32 @@ export async function deskewWithCorners(
   } finally {
     loaded.close();
   }
+}
+
+/**
+ * End-to-end scanner pipeline: scans/deskews an image, extracts text via 100% client-side OCR,
+ * parses structured fields, and generates a tactile skeuomorphic paper template.
+ */
+export async function scanToTemplate(
+  file: File | Blob,
+  options: ScanToTemplateOptions = {},
+): Promise<ScanToTemplateResult> {
+  // 1. Scan / deskew image
+  const scanRes = await scanImage(file, options);
+
+  // 2. Client-side OCR on the deskewed paper
+  const ocrRes = await performOcr(scanRes.blob, options.ocr);
+
+  // 3. Classify and extract structured fields
+  const document = parseDocument(ocrRes.text);
+
+  // 4. Render into premade skeuomorphic SVG template
+  const template = renderTemplate(document, options.templateKind);
+
+  return {
+    template,
+    document,
+    ocr: ocrRes,
+    imageBlob: scanRes.blob,
+  };
 }
