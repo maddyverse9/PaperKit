@@ -1,9 +1,18 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { Paper } from '@paperkit/core';
 import { PaperBoard, useBoard, useBoardPapers } from '@paperkit/react';
-import { deskewWithCorners, scanImage, type ScanCorners } from '@paperkit/scan';
+import {
+  deskewWithCorners,
+  scanImage,
+  performOcr,
+  parseDocument,
+  type ScanCorners,
+  type ExtractedDoc,
+  type RenderedTemplate,
+} from '@paperkit/scan';
 import { BookPreview } from './BookPreview.js';
 import { CornerAdjustModal } from './CornerAdjustModal.js';
+import { TemplateModal } from './TemplateModal.js';
 import {
   createLetterSample,
   createMemoSample,
@@ -29,6 +38,10 @@ export const App: React.FC = () => {
   // Fallback modal state
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [pendingCorners, setPendingCorners] = useState<ScanCorners | null>(null);
+
+  // Template modal state
+  const [pendingTemplateDoc, setPendingTemplateDoc] = useState<ExtractedDoc | null>(null);
+  const [pendingRawOcrText, setPendingRawOcrText] = useState<string | undefined>(undefined);
 
   // Settings
   const [lightAngle, setLightAngle] = useState(315);
@@ -80,6 +93,37 @@ export const App: React.FC = () => {
     board.setTexture({ grain: nextGrain, edgeWear: nextEdgeWear });
   };
 
+  const processOcrAndOpenTemplate = async (imageBlob: Blob, fileName: string) => {
+    setIsScanning(true);
+    setScanStatus('Reading text with 100% Client-Side OCR...');
+
+    try {
+      const ocrResult = await performOcr(imageBlob, {
+        onProgress: ({ status, progress }) => {
+          const pct = Math.round(progress * 100);
+          setScanStatus(`OCR ${status}: ${pct}%`);
+        },
+      });
+
+      const parsedDoc = parseDocument(ocrResult.text);
+      if (parsedDoc.kind === 'receipt' && parsedDoc.merchant === 'STORE RECEIPT' && fileName) {
+        parsedDoc.merchant = fileName.replace(/\.[^/.]+$/, '').toUpperCase();
+      }
+
+      setPendingTemplateDoc(parsedDoc);
+      setPendingRawOcrText(ocrResult.text);
+      setScanStatus('');
+    } catch (err) {
+      console.error('OCR error, using default template:', err);
+      const fallbackDoc = parseDocument('NOTE\n' + fileName);
+      setPendingTemplateDoc(fallbackDoc);
+      setPendingRawOcrText('');
+      setScanStatus('');
+    } finally {
+      setIsScanning(false);
+    }
+  };
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -91,29 +135,19 @@ export const App: React.FC = () => {
       const result = await scanImage(file);
 
       if (result.fallback) {
-        // Low confidence fallback: prompt manual corner adjustment
+        // Low confidence fallback: prompt manual corner adjustment first
         setPendingFile(file);
         setPendingCorners(result.corners);
         setScanStatus('');
       } else {
-        board.addPaper({
-          image: { blob: result.blob, width: result.width, height: result.height },
-          meta: { title: file.name },
-        });
-        setScanStatus('Paper scanned & placed on board!');
-        setTimeout(() => setScanStatus(''), 3000);
+        // Run OCR and open template customizer (replacing the raw screenshot!)
+        await processOcrAndOpenTemplate(result.blob, file.name);
       }
     } catch (err) {
       console.error('Scan error:', err);
-      // Fallback: add original image directly
-      board.addPaper({
-        image: { blob: file, width: 800, height: 1000 },
-        meta: { title: file.name },
-      });
-      setScanStatus('Added original image to board.');
-      setTimeout(() => setScanStatus(''), 3000);
+      // Fallback: run OCR on original image directly
+      await processOcrAndOpenTemplate(file, file.name);
     } finally {
-      setIsScanning(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
@@ -125,22 +159,60 @@ export const App: React.FC = () => {
 
     try {
       const result = await deskewWithCorners(pendingFile, corners);
-      board.addPaper({
-        image: { blob: result.blob, width: result.width, height: result.height },
-        meta: { title: pendingFile.name },
-      });
+      await processOcrAndOpenTemplate(result.blob, pendingFile.name);
     } catch (err) {
       console.error(err);
-      board.addPaper({
-        image: { blob: pendingFile, width: 800, height: 1000 },
-        meta: { title: pendingFile.name },
-      });
+      await processOcrAndOpenTemplate(pendingFile, pendingFile.name);
     } finally {
-      setIsScanning(false);
       setPendingFile(null);
       setPendingCorners(null);
-      setScanStatus('');
     }
+  };
+
+  const handleTemplateConfirm = (rendered: RenderedTemplate) => {
+    const aspect = rendered.width / rendered.height;
+    const targetWidth = rendered.kind === 'receipt' ? 240 : rendered.kind === 'bill' ? 320 : 280;
+    const targetHeight = Math.round(targetWidth / aspect);
+
+    board.addPaper({
+      image: {
+        src: rendered.dataUrl,
+        width: rendered.width,
+        height: rendered.height,
+      },
+      size: { w: targetWidth, h: targetHeight },
+      transform: {
+        x: 460 + (Math.random() - 0.5) * 80,
+        y: 350 + (Math.random() - 0.5) * 60,
+        rotation: (Math.random() - 0.5) * 6,
+        scale: 1,
+      },
+      meta: { title: rendered.title, templateKind: rendered.kind },
+    });
+
+    setPendingTemplateDoc(null);
+    setPendingRawOcrText(undefined);
+    setScanStatus('✨ Placed styled template paper on desk!');
+    setTimeout(() => setScanStatus(''), 3500);
+  };
+
+  const handleOpenBlankTemplate = () => {
+    const sample = parseDocument(
+      `
+ATELIER CAFE & BAKERY
+140 Hayes St, San Francisco
+Order #8942 • 10:42 AM
+1x Cortado (Oat) $5.50
+1x Cardamom Bun $6.00
+1x Hand-drip Geisha $8.50
+Subtotal $20.00
+Tax $1.73
+Total $21.73
+THANK YOU FOR VISITING!
+    `.trim(),
+    );
+    setPendingTemplateDoc(sample);
+    setPendingRawOcrText('Sample template preset');
   };
 
   const handleStressTest50 = () => {
@@ -278,8 +350,21 @@ export const App: React.FC = () => {
               boxShadow: '0 2px 10px rgba(37, 99, 235, 0.3)',
             }}
           >
-            <span>📷</span>
-            <span>{isScanning ? 'Processing...' : 'Upload Photo'}</span>
+            <span>📷✨</span>
+            <span>{isScanning ? 'Processing...' : 'Upload & OCR Template'}</span>
+          </button>
+
+          <button
+            onClick={handleOpenBlankTemplate}
+            style={{
+              ...btnStyle,
+              backgroundColor: 'rgba(59, 130, 246, 0.15)',
+              borderColor: 'rgba(59, 130, 246, 0.4)',
+              color: '#93c5fd',
+              fontWeight: 600,
+            }}
+          >
+            ✨ + Custom Template
           </button>
 
           {/* Add Sample Papers Dropdown */}
@@ -621,6 +706,19 @@ export const App: React.FC = () => {
           onCancel={() => {
             setPendingFile(null);
             setPendingCorners(null);
+          }}
+        />
+      )}
+
+      {/* Tactile Template Customizer & Preview Modal */}
+      {pendingTemplateDoc && (
+        <TemplateModal
+          initialDocument={pendingTemplateDoc}
+          rawOcrText={pendingRawOcrText}
+          onConfirm={handleTemplateConfirm}
+          onCancel={() => {
+            setPendingTemplateDoc(null);
+            setPendingRawOcrText(undefined);
           }}
         />
       )}

@@ -17,6 +17,7 @@ Paperkit is a general-purpose, UI-only foundation: any app can use it to put pap
 - **Manual 4-Corner Refinement**: Fallback UI hook with interactive draggable corner pins for tricky or cluttered backgrounds.
 - **Framework-Agnostic Core**: Zero DOM dependencies in `@paperkit/core` (runnable in Node, workers, or custom renderers), paired with a modern `@paperkit/render-css` engine and a thin `@paperkit/react` wrapper (`<PaperBoard/>`).
 - **Lossless Serialization**: `board.toJSON()` and `Board.fromJSON()` round-trip layout and metadata losslessly.
+- **Tactile Paper Templates & Client-Side OCR**: Transform screenshots and photos into crisp, skeuomorphic vector stationery (thermal receipts with torn edges & barcodes, formal utility bills with distress stamps, yellow legal memo pads, and vintage stationery notes) via 100% client-side Tesseract.js OCR.
 - **100% Client-Side & Private**: No network calls; images never leave the device.
 
 ---

@@ -65,3 +65,151 @@ export interface ScanResult {
   /** True if confidence was below threshold and fallback was triggered. */
   fallback?: boolean;
 }
+
+/**
+ * Real-time progress updates during OCR text recognition.
+ */
+export interface OcrProgress {
+  status: string;
+  progress: number;
+}
+
+/**
+ * Options for client-side OCR recognition.
+ */
+export interface OcrOptions {
+  /** Tesseract language model. Default: 'eng' */
+  lang?: string;
+  /** Progress callback */
+  onProgress?: (progress: OcrProgress) => void;
+  /** Page segmentation mode ('4' for single column / receipts, '6' for uniform block, '3' for auto). Default: '4' */
+  psm?: string;
+  /** Whether to apply OpenCV binarization and DPI upscaling before OCR. Default: true */
+  preprocess?: boolean;
+}
+
+/**
+ * Result of client-side OCR.
+ */
+export interface OcrResult {
+  /** Full raw extracted text. */
+  text: string;
+  /** Average recognition confidence (0 to 100). */
+  confidence: number;
+  /** Cleaned, non-empty text lines. */
+  lines: string[];
+}
+
+/**
+ * Individual line item on a receipt.
+ */
+export interface ReceiptItem {
+  name: string;
+  qty?: number;
+  price: number;
+}
+
+/**
+ * Structured receipt document model.
+ */
+export interface ReceiptDoc {
+  kind: 'receipt';
+  merchant: string;
+  address?: string;
+  date?: string;
+  orderNumber?: string;
+  items: ReceiptItem[];
+  subtotal?: number;
+  tax?: number;
+  total: number;
+  currency: string;
+  footer?: string;
+}
+
+/**
+ * Individual charge line on a bill / invoice.
+ */
+export interface BillItem {
+  description: string;
+  amount: number;
+}
+
+/**
+ * Structured bill or invoice document model.
+ */
+export interface BillDoc {
+  kind: 'bill';
+  company: string;
+  billTo?: string;
+  invoiceNumber?: string;
+  issueDate?: string;
+  dueDate?: string;
+  status: 'PAID' | 'DUE' | 'OVERDUE' | 'PENDING';
+  items: BillItem[];
+  subtotal?: number;
+  tax?: number;
+  total: number;
+  currency: string;
+}
+
+/**
+ * Structured memo or note document model.
+ */
+export interface MemoDoc {
+  kind: 'memo';
+  title: string;
+  date?: string;
+  lines: string[];
+  signature?: string;
+  variant?: 'legal' | 'stationery';
+}
+
+/**
+ * Union of all supported extracted document models.
+ */
+export type ExtractedDoc = ReceiptDoc | BillDoc | MemoDoc;
+
+/**
+ * Supported premade template styles.
+ */
+export type TemplateKind = 'receipt' | 'bill' | 'legal-memo' | 'stationery-note';
+
+/**
+ * Rendered template paper ready to be placed on a PaperBoard.
+ */
+export interface RenderedTemplate {
+  /** The generated raw SVG markup. */
+  svg: string;
+  /** Data URL for direct image rendering. */
+  dataUrl: string;
+  /** Intrinsic pixel width. */
+  width: number;
+  /** Intrinsic pixel height. */
+  height: number;
+  /** Display title for the paper. */
+  title: string;
+  /** Template style used. */
+  kind: TemplateKind;
+}
+
+/**
+ * Options for scanToTemplate() pipeline.
+ */
+export interface ScanToTemplateOptions extends ScanOptions {
+  ocr?: OcrOptions;
+  templateKind?: TemplateKind;
+}
+
+/**
+ * Output of scanToTemplate() pipeline.
+ */
+export interface ScanToTemplateResult {
+  /** The rendered tactile template paper */
+  template: RenderedTemplate;
+  /** The parsed structured data */
+  document: ExtractedDoc;
+  /** The OCR text and confidence */
+  ocr: OcrResult;
+  /** The processed input image blob */
+  imageBlob: Blob;
+}
